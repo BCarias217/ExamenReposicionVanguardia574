@@ -1,71 +1,122 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WorkHub.Data;
 using WorkHub.Models;
 
-namespace WorkHub.Controllers
+namespace WorkHub.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class SalasController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class SalasController : ControllerBase
+    private const int NombreMinLength = 3;
+    private const int NombreMaxLength = 60;
+    private static readonly string[] TiposValidos = { "Individual", "Grupal", "SalaDeJuntas" };
+
+    private readonly WorkHubDbContext _db;
+
+    public SalasController(WorkHubDbContext db) => _db = db;
+
+    [HttpGet]
+    public async Task<IActionResult> GetAll()
     {
-        private readonly WorkHubDbContext _context;
+        var salas = await _db.Salas.ToListAsync();
+        return Ok(salas);
+    }
 
-        public SalasController(WorkHubDbContext context)
-        {
-            _context = context;
-        }
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetById(int id)
+    {
+        var sala = await _db.Salas.FindAsync(id);
+        if (sala is null) return NotFound();
+        return Ok(sala);
+    }
 
-        // GET: api/Salas
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Sala>>> GetSalas()
-        {
-            return await _context.Salas.ToListAsync();
-        }
+    [HttpPost]
+    public async Task<IActionResult> Create(Sala sala)
+    {
+        AplicarTransformacion(sala);
 
-        // GET: api/Salas/5
-        [HttpGet("{id}")]
-        public async Task<ActionResult<Sala>> GetSala(int id)
-        {
-            var sala = await _context.Salas.FindAsync(id);
-            if (sala == null)
-                return NotFound();
+        var errorValidacion = ValidarSala(sala);
+        if (errorValidacion is not null)
+            return BadRequest(errorValidacion);
 
-            return sala;
-        }
+        _db.Salas.Add(sala);
+        await _db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetById), new { id = sala.Id }, sala);
+    }
 
-        // POST: api/Salas
-        [HttpPost]
-        public async Task<ActionResult<Sala>> PostSala(Sala sala)
-        {
-            _context.Salas.Add(sala);
-            await _context.SaveChangesAsync();
-            return CreatedAtAction(nameof(GetSala), new { id = sala.Id }, sala);
-        }
+    [HttpPut("{id}")]
+    public async Task<IActionResult> Update(int id, Sala salaActualizada)
+    {
+        var sala = await _db.Salas.FindAsync(id);
+        if (sala is null) return NotFound();
 
-        // PUT: api/Salas/5
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutSala(int id, Sala sala)
-        {
-            if (id != sala.Id)
-                return BadRequest();
+        AplicarTransformacion(salaActualizada);
 
-            _context.Entry(sala).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-            return NoContent();
-        }
+        var errorValidacion = ValidarSala(salaActualizada);
+        if (errorValidacion is not null)
+            return BadRequest(errorValidacion);
 
-        // DELETE: api/Salas/5
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteSala(int id)
-        {
-            var sala = await _context.Salas.FindAsync(id);
-            if (sala == null)
-                return NotFound();
+        sala.Nombre = salaActualizada.Nombre;
+        sala.TipoSala = salaActualizada.TipoSala;
+        sala.Capacidad = salaActualizada.Capacidad;
+        sala.PrecioPorHora = salaActualizada.PrecioPorHora;
+        sala.Piso = salaActualizada.Piso;
 
-            _context.Salas.Remove(sala);
-            await _context.SaveChangesAsync();
-            return NoContent();
-        }
+        await _db.SaveChangesAsync();
+        return Ok(sala);
+    }
+
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var sala = await _db.Salas.FindAsync(id);
+        if (sala is null) return NotFound();
+
+        _db.Salas.Remove(sala);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    // --- Transformación de datos ---
+
+    private static void AplicarTransformacion(Sala sala)
+    {
+        sala.Nombre = NormalizarNombre(sala.Nombre);
+    }
+
+    private static string NormalizarNombre(string? valor)
+    {
+        if (string.IsNullOrWhiteSpace(valor))
+            return string.Empty;
+
+        var colapsado = Regex.Replace(valor.Trim(), @"\s+", " ");
+        var cultura = CultureInfo.GetCultureInfo("es-HN");
+        return cultura.TextInfo.ToTitleCase(colapsado.ToLower(cultura));
+    }
+
+    // --- Validaciones de formato ---
+
+    private static string? ValidarSala(Sala sala)
+    {
+        if (string.IsNullOrWhiteSpace(sala.Nombre) || sala.Nombre.Length < NombreMinLength || sala.Nombre.Length > NombreMaxLength)
+            return $"El Nombre es obligatorio y debe tener entre {NombreMinLength} y {NombreMaxLength} caracteres.";
+
+        if (!TiposValidos.Contains(sala.TipoSala))
+            return "El TipoSala debe ser 'Individual', 'Grupal' o 'SalaDeJuntas'.";
+
+        if (sala.Capacidad <= 0)
+            return "La Capacidad debe ser un entero mayor a 0.";
+
+        if (sala.PrecioPorHora <= 0)
+            return "El PrecioPorHora debe ser mayor a 0.";
+
+        if (sala.Piso < 0)
+            return "El Piso debe ser un entero mayor o igual a 0.";
+
+        return null;
     }
 }
