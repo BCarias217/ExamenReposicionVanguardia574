@@ -1,7 +1,6 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using WorkHub.Common;
 using WorkHub.Data;
 using WorkHub.Models;
 
@@ -38,11 +37,8 @@ public class SalasController : ControllerBase
     public async Task<IActionResult> Create(Sala sala)
     {
         AplicarTransformacion(sala);
-
         var errorValidacion = ValidarSala(sala);
-        if (errorValidacion is not null)
-            return BadRequest(errorValidacion);
-
+        if (errorValidacion is not null) return BadRequest(errorValidacion);
         _db.Salas.Add(sala);
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = sala.Id }, sala);
@@ -53,19 +49,14 @@ public class SalasController : ControllerBase
     {
         var sala = await _db.Salas.FindAsync(id);
         if (sala is null) return NotFound();
-
         AplicarTransformacion(salaActualizada);
-
         var errorValidacion = ValidarSala(salaActualizada);
-        if (errorValidacion is not null)
-            return BadRequest(errorValidacion);
-
+        if (errorValidacion is not null) return BadRequest(errorValidacion);
         sala.Nombre = salaActualizada.Nombre;
         sala.TipoSala = salaActualizada.TipoSala;
         sala.Capacidad = salaActualizada.Capacidad;
         sala.PrecioPorHora = salaActualizada.PrecioPorHora;
         sala.Piso = salaActualizada.Piso;
-
         await _db.SaveChangesAsync();
         return Ok(sala);
     }
@@ -76,47 +67,32 @@ public class SalasController : ControllerBase
         var sala = await _db.Salas.FindAsync(id);
         if (sala is null) return NotFound();
 
+        var tieneReservas = await _db.Reservas.AnyAsync(r => r.SalaId == id);
+        if (tieneReservas)
+            return Conflict("No se puede eliminar la Sala porque tiene reservas registradas.");
+
         _db.Salas.Remove(sala);
         await _db.SaveChangesAsync();
         return NoContent();
     }
 
-    // --- Transformación de datos ---
-
     private static void AplicarTransformacion(Sala sala)
     {
-        sala.Nombre = NormalizarNombre(sala.Nombre);
+        sala.Nombre = TextNormalizer.Normalizar(sala.Nombre);
     }
-
-    private static string NormalizarNombre(string? valor)
-    {
-        if (string.IsNullOrWhiteSpace(valor))
-            return string.Empty;
-
-        var colapsado = Regex.Replace(valor.Trim(), @"\s+", " ");
-        var cultura = CultureInfo.GetCultureInfo("es-HN");
-        return cultura.TextInfo.ToTitleCase(colapsado.ToLower(cultura));
-    }
-
-    // --- Validaciones de formato ---
 
     private static string? ValidarSala(Sala sala)
     {
         if (string.IsNullOrWhiteSpace(sala.Nombre) || sala.Nombre.Length < NombreMinLength || sala.Nombre.Length > NombreMaxLength)
             return $"El Nombre es obligatorio y debe tener entre {NombreMinLength} y {NombreMaxLength} caracteres.";
-
         if (!TiposValidos.Contains(sala.TipoSala))
             return "El TipoSala debe ser 'Individual', 'Grupal' o 'SalaDeJuntas'.";
-
         if (sala.Capacidad <= 0)
             return "La Capacidad debe ser un entero mayor a 0.";
-
         if (sala.PrecioPorHora <= 0)
             return "El PrecioPorHora debe ser mayor a 0.";
-
         if (sala.Piso < 0)
             return "El Piso debe ser un entero mayor o igual a 0.";
-
         return null;
     }
 }
